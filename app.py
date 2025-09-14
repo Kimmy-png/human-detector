@@ -4,7 +4,8 @@ import numpy as np
 import cv2
 from PIL import Image
 import av
-from streamlit_webrtc import webrtc_streamer, VideoFrameCallback
+# PERUBAHAN 1: Hapus 'VideoFrameCallback' dari import
+from streamlit_webrtc import webrtc_streamer
 
 # --- KONFIGURASI APLIKASI ---
 st.set_page_config(
@@ -41,17 +42,12 @@ def process_frame(frame: np.ndarray):
     """
     Fungsi ini mengambil frame gambar, melakukan deteksi, dan mengembalikannya dengan anotasi.
     """
-    # Lakukan prediksi dengan model
     results = model.predict(frame, verbose=False)
-
-    # Buat salinan gambar untuk digambari
     annotated_image = frame.copy()
     person_in_zone = False
     
-    # Menggambar poligon zona pada gambar
     cv2.polylines(annotated_image, [ZONE_POLYGON], isClosed=True, color=(255, 0, 0), thickness=2)
 
-    # Iterasi melalui hasil deteksi
     for result in results:
         for box in result.boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -62,11 +58,10 @@ def process_frame(frame: np.ndarray):
             center_point = (int((x1 + x2) / 2), int((y1 + y2) / 2))
             is_inside = cv2.pointPolygonTest(ZONE_POLYGON, center_point, False) >= 0
 
-            color = (0, 255, 0) # Default: Hijau (di luar zona)
-            
+            color = (0, 255, 0)
             if is_inside and class_name == 'human':
                 person_in_zone = True
-                color = (0, 0, 255) # Merah (di dalam zona)
+                color = (0, 0, 255)
             
             cv2.rectangle(annotated_image, (x1, y1), (x2, y2), color, 2)
             label = f'{class_name}: {confidence:.2f}'
@@ -74,7 +69,6 @@ def process_frame(frame: np.ndarray):
             cv2.circle(annotated_image, center_point, 5, color, -1)
             
     return annotated_image, person_in_zone
-
 
 # --- LOGIKA BERDASARKAN MODE YANG DIPILIH ---
 if app_mode == "Upload Gambar":
@@ -104,26 +98,22 @@ if app_mode == "Upload Gambar":
 elif app_mode == "Kamera Real-time":
     st.info("Anda memilih mode 'Kamera Real-time'. Klik 'START' untuk memulai.")
     
-    class VideoProcessor(VideoFrameCallback):
-        def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-            # Konversi frame ke format numpy array (BGR)
-            img = frame.to_ndarray(format="bgr24")
-            
-            # Proses frame
-            annotated_image, person_in_zone = process_frame(img)
-            
-            # Tambahkan status teks langsung pada frame video
-            status_text = "TERDETEKSI: Ada 'human' di dalam area" if person_in_zone else "AMAN: Tidak ada 'human' di dalam area"
-            status_color = (0, 0, 255) if person_in_zone else (0, 255, 0) # Merah jika terdeteksi, Hijau jika aman
-            cv2.putText(annotated_image, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
-            
-            # Konversi frame yang sudah dianotasi kembali ke format VideoFrame
-            return av.VideoFrame.from_ndarray(annotated_image, format="bgr24")
+    # PERUBAHAN 2: Mengubah Class menjadi fungsi callback biasa
+    def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+        img = frame.to_ndarray(format="bgr24")
+        
+        annotated_image, person_in_zone = process_frame(img)
+        
+        status_text = "TERDETEKSI: Ada 'human' di dalam area" if person_in_zone else "AMAN: Tidak ada 'human' di dalam area"
+        status_color = (0, 0, 255) if person_in_zone else (0, 255, 0)
+        cv2.putText(annotated_image, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+        
+        return av.VideoFrame.from_ndarray(annotated_image, format="bgr24")
 
+    # PERUBAHAN 3: Memanggil streamer dengan fungsi callback
     webrtc_streamer(
         key="realtime-detection",
-        video_frame_callback=VideoProcessor,
+        video_frame_callback=video_frame_callback, # Menggunakan fungsi, bukan class
         media_stream_constraints={"video": True, "audio": False},
         async_processing=True,
     )
-
